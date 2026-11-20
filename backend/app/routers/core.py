@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Body, HTTPException
 
 from app.db import connect
@@ -82,6 +84,72 @@ def occupancy_proofs():
 @router.post("/ingest/run")
 def run_ingest():
     return ingest_svc.run_batch()
+
+
+@router.get("/ingest/batches")
+def list_ingest_batches():
+    """只读：批次对账快照列表（最新在前）。"""
+    conn = connect()
+    try:
+        rows = conn.execute(
+            "SELECT id, created_at, status, report_json FROM ingest_batches ORDER BY created_at DESC, id DESC"
+        ).fetchall()
+        out = []
+        for r in rows:
+            report = json.loads(r["report_json"])
+            out.append(
+                {
+                    "batch_id": r["id"],
+                    "created_at": r["created_at"],
+                    "status": r["status"],
+                    "events_inserted": report.get("events_inserted"),
+                    "occupancies_opened": report.get("occupancies_opened"),
+                    "occupancies_closed": report.get("occupancies_closed"),
+                    "held_count": report.get("held_count"),
+                }
+            )
+        return out
+    finally:
+        conn.close()
+
+
+@router.get("/ingest/batches/{batch_id}")
+def get_ingest_batch(batch_id: str):
+    """只读：单批次不可变对账快照（report_json 原样返回）。"""
+    conn = connect()
+    try:
+        row = conn.execute(
+            "SELECT id, created_at, status, report_json FROM ingest_batches WHERE id=?",
+            (batch_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "批次不存在")
+        return {
+            "batch_id": row["id"],
+            "created_at": row["created_at"],
+            "status": row["status"],
+            "report": json.loads(row["report_json"]),
+        }
+    finally:
+        conn.close()
+
+
+@router.get("/ingest/batches/{batch_id}/verify")
+def verify_ingest_batch(batch_id: str):
+    """只读核证：对已落库快照做库内实时再核对，不产生任何写入。"""
+    from app.modules import ingest_batch_count_reconcile as reconcile
+
+    conn = connect()
+    try:
+        row = conn.execute(
+            "SELECT id, status, report_json FROM ingest_batches WHERE id=?",
+            (batch_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "批次不存在")
+        return reconcile.reverify(conn, row)
+    finally:
+        conn.close()
 
 
 @router.get("/settings")

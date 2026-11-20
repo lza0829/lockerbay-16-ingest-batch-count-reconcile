@@ -49,14 +49,29 @@ CREATE TABLE IF NOT EXISTS quarantine (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   reason TEXT NOT NULL,
   member_json TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  batch_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS ingest_batches (
   id TEXT PRIMARY KEY,
   created_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'committed',
   report_json TEXT NOT NULL DEFAULT '{}'
 );
+
+-- 对账快照不可变：ingest_batches 只追加，禁 UPDATE / DELETE
+CREATE TRIGGER IF NOT EXISTS trg_ingest_batches_no_update
+BEFORE UPDATE ON ingest_batches
+BEGIN
+  SELECT RAISE(ABORT, 'ingest_batches 为不可变对账快照，禁止更新');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_ingest_batches_no_delete
+BEFORE DELETE ON ingest_batches
+BEGIN
+  SELECT RAISE(ABORT, 'ingest_batches 为不可变对账快照，禁止删除');
+END;
 
 CREATE TABLE IF NOT EXISTS occupancy_proofs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,9 +91,22 @@ def overdue_hours(conn) -> int:
     return int(row["value"]) if row else 48
 
 
+def _migrate(conn):
+    """老库补列；幂等（触发器已在 SCHEMA 中 IF NOT EXISTS 创建）。"""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(ingest_batches)").fetchall()}
+    if "status" not in cols:
+        conn.execute(
+            "ALTER TABLE ingest_batches ADD COLUMN status TEXT NOT NULL DEFAULT 'committed'"
+        )
+    qcols = {r["name"] for r in conn.execute("PRAGMA table_info(quarantine)").fetchall()}
+    if "batch_id" not in qcols:
+        conn.execute("ALTER TABLE quarantine ADD COLUMN batch_id TEXT")
+
+
 def init_db():
     conn = connect()
     conn.executescript(SCHEMA)
+    _migrate(conn)
     if not conn.execute("SELECT 1 FROM settings WHERE key='overdue_hours'").fetchone():
         conn.execute("INSERT INTO settings(key, value) VALUES ('overdue_hours', '48')")
     if conn.execute("SELECT COUNT(*) AS c FROM cabinets").fetchone()["c"] == 0:

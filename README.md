@@ -19,3 +19,24 @@ cd ../frontend
 npm install
 npm run dev
 ```
+
+## 装载批次对账（ingest_batch_count_reconcile）
+
+每批装载物化不可变对账报告（`ingest_batches.report_json`，触发器禁 UPDATE/DELETE），
+必备四字段 `events_inserted / occupancies_opened / occupancies_closed / held_count`，
+报告值与库内本批实际变化逐字段核对；不一致则 SAVEPOINT 整批回滚，批次标
+`reconcile_failed` 留痕，绝不冒充成功。只读核证接口：
+
+- `GET /api/ingest/batches`：批次快照列表
+- `GET /api/ingest/batches/{id}`：单批不可变快照
+- `GET /api/ingest/batches/{id}/verify`：库内实时再核证（零写入）
+
+本地夹具与 SQLite 冒烟（均用临时隔离库，不污染开发库）：
+
+```bash
+cd backend
+.venv/bin/python -I scripts/reconcile_smoke.py   # 对账/撕裂回滚/异常回滚/幂等
+.venv/bin/python -I scripts/http_smoke.py        # HTTP 端到端 + 老库迁移
+```
+
+撕裂注入（仅测试用）：`LOCKERBAY_TEAR_MODE=drop-event|occ-open|hold-row`。

@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 本地 SQLite 数据
+backend/app/data/
+
+# Node / 前端构建
+node_modules/
+frontend/dist/

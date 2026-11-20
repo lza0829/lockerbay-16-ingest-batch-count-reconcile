@@ -19,4 +19,7 @@ export const api = {
   setOverdue: (overdue_hours) =>
     req('/api/settings/overdue-hours', { method: 'PUT', body: JSON.stringify({ overdue_hours }) }),
   ingest: () => req('/api/ingest/run', { method: 'POST', body: '{}' }),
+  ingestBatches: () => req('/api/ingest/batches'),
+  ingestBatch: (batchId) => req(`/api/ingest/batches/${batchId}`),
+  verifyIngestBatch: (batchId) => req(`/api/ingest/batches/${batchId}/verify`),
 }
